@@ -1,0 +1,20 @@
+# Virtual Environment
+venv-jupiter/
+pyvenv.cfg
+
+# IntelliJ / PyCharm
+.idea/
+*.iml
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Daten / große Files
+*.csv
+*.tsv
+*.parquet
