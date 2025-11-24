@@ -1,5 +1,6 @@
 # Virtual Environment
 venv-jupiter/
+venv/
 pyvenv.cfg
 
 # IntelliJ / PyCharm
