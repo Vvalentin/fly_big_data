@@ -4,7 +4,7 @@ Features:
 - Multithreading für maximalen Speed.
 - Shared S3-Client (vermeidet Connection-Pool Warnungen).
 - Zählt exakt den Speicherplatz der ENTPACKTEN CSV-Dateien.
-- Pylint Konform (Lazy Logging).
+- Konfigurierbar über .env Datei.
 """
 
 import os
@@ -18,18 +18,24 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import boto3
 from botocore import UNSIGNED
 from botocore.config import Config
+from dotenv import load_dotenv
 
-# Konfig
+# --- 1. Konfiguration laden ---
+load_dotenv()  # WICHTIG: Lädt die Variablen aus der .env Datei
+
+# Standard-Pfad (falls nichts in .env steht): data/raw im Projektordner
+DEFAULT_PATH = os.path.join(os.getcwd(), 'data', 'raw')
+
+# Variablen aus .env holen
+LOKALER_SPEICHERORT = os.getenv('OPENSKY_DOWNLOAD_PATH', DEFAULT_PATH)
+MAX_FILES = int(os.getenv('MAX_FILES', '5'))
+MAX_WORKERS = int(os.getenv('MAX_WORKERS', '5'))
+
+# Feste Konfig
 BUCKET_NAME = 'data-samples'
 START_ORDNER = 'states/'
-# Pfad auf eigene Umgebgung anpassen!
-LOKALER_SPEICHERORT = r'EIGENEN PFAD EINFÜGEN\fly_data_project\data_example'
 ENDPOINT_URL = 'https://s3.opensky-network.org'
-MAX_FILES = 1
-
-# Filter & Performance (Bei Performance Problemen MAX_WORKERS und POOL_SIZE verringern.)
 MIN_DATEIGROESSE_BYTES = 1024 * 1024  # 1 MB (Download-Filter)
-MAX_WORKERS = 10                       # Anzahl gleichzeitiger Downloads
 POOL_SIZE = MAX_WORKERS + 5           # Puffer für HTTP-Verbindungen
 
 # Logging Setup
@@ -95,6 +101,13 @@ def _worker_prozess(s3_client, bucket, s3_key, lokaler_pfad):
 def main():
     """Hauptfunktion für Initialisierung und Thread-Steuerung."""
 
+    # Ordner erstellen, falls nicht existent (nutzt jetzt den Pfad aus .env)
+    if not os.path.exists(LOKALER_SPEICHERORT):
+        os.makedirs(LOKALER_SPEICHERORT)
+        print(f"Zielordner erstellt: {LOKALER_SPEICHERORT}")
+    else:
+        print(f"Speichere Daten in: {LOKALER_SPEICHERORT}")
+
     # 1. Shared Client erstellen
     config = Config(
         signature_version=UNSIGNED,
@@ -104,18 +117,27 @@ def main():
         's3', endpoint_url=ENDPOINT_URL, config=config)
 
     # 2. Listing der Dateien im Bucket
-    logger.info("Initialisiere %d Worker. Scanne Bucket '%s'...",
-                MAX_WORKERS, BUCKET_NAME)
+    logger.info("Initialisiere %d Worker. Scanne Bucket '%s' (Limit: %d)...",
+                MAX_WORKERS, BUCKET_NAME, MAX_FILES)
 
     paginator = shared_client.get_paginator('list_objects_v2')
     seiten = paginator.paginate(Bucket=BUCKET_NAME, Prefix=START_ORDNER)
 
     aufgaben_liste = []
+    stop_search = False
 
     for seite in seiten:
+        if stop_search:
+            break
         if 'Contents' not in seite:
             continue
+
         for obj in seite['Contents']:
+            # Stoppen sobald Limit erreicht
+            if len(aufgaben_liste) >= MAX_FILES:
+                stop_search = True
+                break
+
             key = obj['Key']
             size = obj['Size']
 
@@ -139,13 +161,6 @@ def main():
 
             aufgaben_liste.append((key, lokal_tar))
 
-        #stoppt sobald entsprechende Dateimenge erreicht ist
-            if len(aufgaben_liste) >= MAX_FILES:
-                break
-        if len(aufgaben_liste) >= MAX_FILES:
-            break
-
-
     total_files = len(aufgaben_liste)
     logger.info(
         "%d neue Dateien gefunden. Starte Parallel-Verarbeitung...\n", total_files)
@@ -161,7 +176,7 @@ def main():
             for k, p in aufgaben_liste
         }
 
-        # Ergebnisse einsammeln, sobald sie fertig werden (Echtzeit)
+        # Ergebnisse einsammeln
         for future in as_completed(future_map):
             erledigt_counter += 1
             groesse_csv, name = future.result()
@@ -184,6 +199,7 @@ def main():
     logger.info("-" * 40)
     logger.info("ENDE. Belegter Speicherplatz (Unkomprimiert): %.2f GB",
                 gesamt_csv_bytes / (1024**3))
+    logger.info("Daten liegen in: %s", LOKALER_SPEICHERORT)
 
 
 if __name__ == "__main__":
