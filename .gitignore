@@ -16,10 +16,8 @@ __pycache__/
 # Jupyter
 .ipynb_checkpoints/
 
-# Daten / große Files
-*.csv
-*.tsv
-*.parquet
+# Data Lake (Raw & Processed)
+data/
 
 # Environment Variablen
 .env
